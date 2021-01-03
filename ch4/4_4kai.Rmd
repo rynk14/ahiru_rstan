@@ -1,0 +1,37 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+model4-4_kai.stanを実行するRファイル
+
+```{r}
+library(rstan)
+library(ggplot2)
+```
+
+```{r}
+input = read.csv("data-salary.txt")
+Xnew = 23:60 # 新しい年齢データ 23歳~60歳
+# stanモデルファイルのdata系のブロックで書いた名前に合わせて名前付きリストを作る
+data1 = list(N=nrow(input), X=input$X, Y=input$Y, N_new=length(Xnew), X_new = Xnew)
+data1
+```
+```{r}
+fit = stan("model4-4_kai.stan", data = data1, seed=1234) # stan実行
+ms = rstan::extract(fit) # MCMCサンプルを抽出
+```
+```{r}
+fit
+```
+上が一通りの結果
+例えばms$y_new[i,j]は、i番目のサンプルにおけるj+22歳の年収の予測値
+ms$y_new[,j]とするとj+22歳のサンプル全て
+ms$y_new[i,]とするとi番目のサンプルでの各年齢の年収
+```{r}
+for (i in 1:length(ms$a)){
+  plot(ms$y_new[i,], ann=FALSE, ylim=c(0,1700))
+  par(new=T)
+}
+```
+上のグラフは各年齢23~60歳の年収のMCMCサンプル

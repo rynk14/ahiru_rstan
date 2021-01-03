@@ -1,0 +1,163 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+```{r}
+library(rstan)
+library(ggplot2)
+```
+
+データを読み込む
+```{r}
+# データの読み込み
+input = read.csv("data-salary.txt")
+```
+
+ggplotオブジェクトの作成
+ggplotはpythonでいうfig, ax = subplotみたいな感じで
+オブジェクトで管理する
+p = p + 何たら
+という形で情報を追加できる
+geom_point()は散布図
+```{r}
+p = ggplot(data = input, aes(x = X, y = Y))
+p = p + geom_point()
+plot(p)
+```
+一応線形回帰できそうな感じである
+
+次にモデル式を考える。
+4.1
+Y_i = y_i + e_i
+y_i = a + bX_i
+e_i ~ N(0, s)
+これと同等な表現として
+Y_i = a + bX_i + e_i
+e_i ~ N(0, s)
+とか、
+y_i = a + bX_i
+Y_i ~ N(y_i, s)
+さらに
+Y_i ~ N(a+bX_i, s)
+とか書ける。
+
+ここで誤差項e_iを書かない形のほうが計算が高速になるが、収束しにくくなることもある
+場合によってe_iを書くこともあるらしい
+
+今の単回帰問題を単にRで書くことができる
+```{r}
+result_lm = lm(Y ~ X, data = input)
+summary(result_lm)
+```
+これをstanで実装してみる
+まずstanから、stanファイルを本と同じ名前 model4-5.stanで作る
+
+Stanのモデルファイルを作成しただけでは計算は実行されないのでRから実行する
+rstanパッケージを使って、Rからdataブロックに含まれるデータを渡して、サンプリングの
+命令を実行する
+
+```{r}
+# library(rstan)
+# input = read.csv("ファイルのある場所")
+# これは上でやってるからコメントアウトしてる
+
+# stanのdataブロックに渡すデータを名前付きリストにしてる
+data1 = list(N=nrow(input), X=input$X, Y=input$Y)
+
+# stanのモデルファイルにデータを渡して実行している seedはテキストと同じ設定
+fit = stan("model4-4.stan", data=data1, seed=1234)
+
+```
+それではRでfitの中身を見てみよう
+```{r}
+fit
+```
+chainsがMCMCの連鎖の数、iterが各連鎖での繰り返し数
+warmupはburn-inみたいなもの、thinはMCMCサンプルを取り出す間隔
+draws=chains*(iter-warmup)/thin=4000が得られたMCMCサンプルのサイズ
+これらの数はデフォルト値で、自分で変えれる
+
+meanは事後平均, %はベイズ信頼区間
+n_effは実効的なMCMCサンプルの数、最低でも100はいるらしい
+RhatはMCMCが収束したかを表す一つの指標
+Rhat < 1.1 なら収束したと見なせるみたいだ
+
+Rのlm関数で単回帰したやつと比べてみる
+上でlm関数使って単回帰した結果を再掲する
+```{r}
+summary(result_lm)
+```
+lm関数の切片と、stanモデルのパラメータaの事後平均
+また、傾きとパラメータbの事後平均は大体同じ値になってる
+
+lmでは最小二乗か何かで切片傾きを出してる
+一方stanでは、MCMCによりパラメータの事後平均を出してる
+
+
+次にMCMCの収束を診断する (p.42)
+ggmcmcというパッケージを使う
+これはggplot2を利用したMCMCの収束診断するやつである
+何か診断ファイルをpdfに保存してそのpdfを読み込んで収束診断プロットするみたい
+詳細はテキスト
+簡単にやろう思ったら、traceplot(fit)てやれば各パラメータのtraceplot見れる
+
+```{r}
+traceplot(fit)
+```
+ギザギザの幅が大きいように見えるけど縦軸の値に注意するととんでもなく大きい幅で
+変動しているわけではないことがわかる (特にb)
+
+MCMCのアルゴリズムはchainごとに独立しているので、各chainを並列で計算しておいて
+最後にまとめることで計算時間を短縮できる。
+これをするには、stan関数やstan_model関数,sampling関数を呼ぶ前に次のコードを
+Rに書くだけ
+```{r}
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+```
+
+
+ここいらで解析の目的に立ち返る。
+すなわち基本年収のベイズ信頼区間と実際の年収のベイズ予測区間がほしい
+これをするために、MCMCさんぷるを取り出す
+rstan::extract(stanオブジェクトの変数名)
+でMCMCサンプルを取り出せる
+```{r}
+ms = rstan::extract(fit)
+# ms$a
+```
+これでmsに各パラメータ4000個分のサンプルが入った
+これの信頼区間出したければ、quantile関数で簡単に出せる
+```{r}
+# bの95%信頼区間
+quantile(ms$b, probs=c(0.025, 0.975))
+```
+
+例えば年齢が50歳 (X=50) の基本年収 (a+bX) の分布からのMCMCサンプルと
+年収 (Y) の予測分布からのMCMCサンプルを作成する。
+```{r}
+N_mcmc = length(ms$a) # サンプルの長さ4000
+y50_base = ms$a + ms$b*50 # 基本年収
+y50 = rnorm(n=N_mcmc, mean=y50_base, sd=ms$sigma)
+plot(y50)
+quantile(y50_base, probs=c(0.025, 0.975)) # 50歳の基本年収のベイズ信頼区間
+quantile(y50, probs=c(0.025, 0.975)) # 50歳の年収のベイズ予測区間
+
+```
+上ではstanモデルで実行したもの(fit)を色々処理していろいろな結果を見た
+ここでいう色々処理は、全部Rで書いた
+しかし、こうすると計算速度が落ちるしコードは冗長になるしであまりよくない。
+できるだけStanで書いてしまうのがよい
+それを実現するのがstanのtransformed parametersブロックとgenerated quantitiesブロック
+
+これは別ファイル model4-4_kai.stanと4_4kai.Rで実行する
+
+```{r}
+getwd()
+```
+
