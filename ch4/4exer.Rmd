@@ -1,0 +1,136 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+カレントディレクトリの移動
+```{r}
+setwd("ahiru/ch4")
+```
+
+4章の練習問題p.53をやる
+内容は以下の通り
+
+t検定に相当することをStanで行う。ちなみにt検定は2群間の平均に差があるかどうかを
+検定するやつ。グループ1（Y1）の平均パラメータμ1とグループ2の平均パラメータμ2に
+差があるかを、P(μ1<μ2)で判断したい。
+
+使えるデータは以下で作る
+
+```{r}
+set.seed(123)
+N1 = 30
+N2 = 20
+Y1 = rnorm(n=N1, mean=0, sd=5)
+Y2 = rnorm(n=N2, mean=1, sd=4)
+```
+
+(1) 各グループの値に差があるかを大体で把握するためにboxplotでも描く。
+
+```{r}
+boxplot(Y1, Y2, names=c("Y1", "Y2"), col=c("red", "blue"))
+```
+データの数が少ないから何とも言えん微妙な図であるが、
+赤のほうが低いとこに集まってる感じがしなくもない。
+
+(2) 各グループで標準偏差が等しいと仮定してモデル式を書く。
+これはstanで書く。model_4exer.stanを参照
+モデル式は
+Y1 ~ N(mu1, sigma)
+Y2 ~ N(mu2, sigma)
+
+
+(3) Stanのモデルファイルを実行する。
+
+```{r}
+library(rstan)
+data3 = list(N1=N1, N2=N2, Y1=Y1, Y2=Y2)
+fit3 = stan("model_4exer.stan", data=data3, seed=1234)
+```
+
+(4) 得られたMCMCサンプルからP(mu1<mu2)を計算する。
+
+```{r}
+# MCMCサンプルの抽出
+ms = rstan::extract(fit3)
+```
+```{r}
+mu1_sample = ms$mu1
+mu2_sample = ms$mu2
+count = 0
+for (i in 1:length(mu1_sample)){
+  if (mu1_sample[i]<mu2_sample[i]){
+    count = count + 1
+  }
+}
+prob = count / length(mu1_sample)
+prob
+```
+等分散性を仮定すると、mu1<mu2の確率が0.9を超えた
+
+(5) グループごとの標準偏差が異なる場合をモデル式で表現し、(4)と同様に確率を求める
+モデルファイルはmodel_4exer5.stan
+
+モデル式は
+Y1 ~ N(mu1, sigma1)
+Y2 ~ N(mu2, sigma2)
+
+モデルファイルを実行する。
+stanに食わせるデータさっき作ったdata3
+
+```{r}
+fit5 = stan("model_4exer5.stan", data=data3, seed=1234)
+```
+MCMCサンプルを抽出して確率を計算する
+
+```{r}
+ms5 = rstan::extract(fit5)
+mu1_sample5 = ms5$mu1
+mu2_sample5 = ms5$mu2
+N = length(mu1_sample5)
+count = 0
+for (i in 1:N){
+  if (mu1_sample5[i] < mu2_sample5[i]){
+    count = count + 1
+  }
+}
+prob5 = count / N
+prob5
+```
+分散が等しくないことを仮定すると、さっきよりも若干確率高い
+
+練習問題にはないけど、実際に生成したMCMCサンプルから母集団の平均分散を推定してみる
+まずは等分散を仮定して作ったサンプルについて
+
+```{r}
+mu1_est = mean(mu1_sample)
+mu2_est = mean(mu2_sample)
+sigma_est = mean(ms$sigma)
+print(c(mu1_est,mu2_est, sigma_est))
+```
+母集団がそれぞれ N(0, 5^2), N(1, 4^2)
+であるのに対して、推定結果は
+N(-0.24, 4.47^2), N(1.63, 4.47^2)
+となった。
+
+一方分散等しくない奴は
+
+```{r}
+mu1_est5 = mean(mu1_sample5)
+mu2_est5 = mean(mu2_sample5)
+sigma1_est5 = mean(ms5$sigma1)
+sigma2_est5 = mean(ms5$sigma2)
+print(c(mu1_est5, sigma1_est5, mu2_est5, sigma2_est5))
+```
+以上から推定結果は
+N(-0.26, 5.12^2), N(1.61, 3.63^2)
+となった。
+
+最後にまとめておく
+母集団
+1:N(0, 5^2), 2:N(1, 4^2)
+推定 (等分散)
+1:N(-0.24, 4.47^2), 2:N(1.63, 4.47^2)
+推定
+1:N(-0.26, 5.12^2), 2:N(1.61, 3.63^2)
+
+そこそこ推定はできてる？
