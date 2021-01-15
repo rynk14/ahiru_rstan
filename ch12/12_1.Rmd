@@ -1,0 +1,83 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+12章
+
+p.231 21日間の来場者数データが与えられていて、3日先までの来場人数を予測したい
+トレンドのモデル
+mu[t]=mu[t-1]+e_mu[t-1]
+観測値のモデル
+Y[t]=mu[t]+e_y[t]
+誤差の分布
+e_mu[t]~N(0, s_mu)
+e_y[t]~N(0, s_y)
+
+まとめたモデル
+mu[t]~N(mu[t-1], s_mu)
+Y[t]~N(mu[t], s_y)
+
+これはp.232に書いてる
+
+```{r}
+library(rstan)
+```
+```{r}
+df = read.csv("input/data-ss1.txt")
+df
+```
+
+サンプルデータ
+```{r}
+T = nrow(df)
+data1 = list(T=T, T_pred=3, Y=df$Y)
+fit = stan("model12_2.stan", data=data1, seed=1234)
+```
+```{r}
+# mcmcサンプルの抽出
+ms = rstan::extract(fit)
+```
+```{r}
+summary(ms$y_pred)
+```
+```{r}
+getwd()
+save.image("result_12_1.RData")
+```
+
+このsummaryのV2, V2, V3の欄がそれぞれ1～３日先の予測値に関する統計量
+
+ms$mu[,i] でi日目の平均
+```{r}
+load("result_12_1.RData")
+```
+
+```{r}
+mu_est = c()
+for (i in 1:24){
+  mu_est = c(mu_est, median(ms$mu_all[,i]))
+}
+
+```
+```{r}
+# 平均の推定、予測値
+mu_est
+```
+```{r}
+# 来場人数のシミュレーション的なやつ
+y_est = rnorm(n=24, mean=mu_est, sd=ms$s_y)
+plot(y_est, type="o", col="red", xlim=c(0,25), ylim=c(10,14), ann=F) #推定, 予測
+par(new=T)
+plot(df$Y, type="o", col="black", xlim=c(0,25), ylim=c(10,14), ann=F) # 観測値
+```
+赤が推定、予測値で、黒が実際のデータのプロット
+乱数によって実行する度に赤のプロットは変わるが、大体黒を追いかけてる
+
+予測値の分布を見てみる
+```{r}
+hist(ms$y_pred[,1], breaks=seq(9,16,0.1))
+hist(ms$y_pred[,2], breaks=seq(9,16,0.1))
+hist(ms$y_pred[,3], breaks=seq(9,18,0.1))
+```
+
