@@ -1,0 +1,82 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+SVモデルを実装する
+参考は大森先生の論文と、Stanの公式？サポートページ的なやつ
+https://www.terrapub.co.jp/journals/jjssj/pdf/4202/42020273.pdf
+https://stan-ja.github.io/gh-pages-html/
+
+まずはデータの取り込み
+2020年の日経225の指数の日次データ
+
+```{r}
+df = read.csv("input/N225_1year.csv")
+close = df$Close
+T = length(close)
+ret = log(close[2:T]/close[1:(T-1)])
+```
+
+とりあえず対数リターンの系列をプロット
+```{r}
+plot(ret, type="o", main="log return")
+```
+garchで使ったやつと全く一緒
+
+それではmodelを適合する
+
+```{r}
+data1 = list(T=T-1, ret=ret)
+fit = stan("svmodel.stan", data=data1)
+```
+
+```{r}
+traceplot(fit)
+```
+トレースプロット見た感じ、誤差の標準偏差sigmaと
+対数ボラhの平均muが暴れ気味
+
+```{r}
+fit
+```
+グラフでは暴れてるように見えたがR^hatはほぼ1でいいぐらい
+1.1以下ならいい感じとアヒル本にも書いてた
+ただn_eff (実効的なMCMCサンプルの数) がsigmaが43と低い。
+全部で4000個サンプル作って43
+アヒル本的には最低でも100は欲しいとのこと
+ここはちょっと不具合があるんだろうな。。。
+
+とりあえず結果だす
+
+```{r}
+ms = rstan::extract(fit)
+```
+```{r}
+logvola_est = c()
+for (i in 1:(T-1)){
+  logvola_est = c(logvola_est, median(ms$h[,i]))
+}
+plot(logvola_est, type="o", main="log volatility")
+plot(exp(logvola_est), type="o", main="volatility")
+hist(ms$phi, main="Hist of phi")
+```
+
+対数ボラティリティとそれにexp()してただのボラにしたやつ、そして、持続性パラメータφ
+のヒストグラムを示した
+
+持続性は大体1に近い、すなわち自己相関がある
+対数ボラと、ボラのプロットは形が違う。
+対数ボラのほうが隣接する時点同士が密である。
+
+対数ボラのグラフがネットにあった同時期のボラティリティ指数のグラフとそっくり
+
+まぁ変な推定はしてないだろう。。
+
+一応データ保存しとく
+```{r}
+load("sv.RData")
+```
+
+
+

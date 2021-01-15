@@ -1,0 +1,98 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+GARCHモデルをstanでやってみる
+モデル式
+r_t = μ+ε_t
+ε_t = σ_t×z_t z_t~N(0,1)
+σ^2_t = ω+βσ^2_(t-1)+αε^2_(t-1)
+
+である。
+
+r_tが収益率で、σがボラ
+
+では、garchmodel.stanを実行する
+
+```{r}
+library(rstan)
+```
+
+データとして
+１年分の日経225の指数を使う
+```{r}
+df = read.csv("input/N225_1year.csv")
+N = nrow(df)
+close = df$Close
+```
+
+収益率 = (当日の終値-前日の終値)/前日の終値 × 100
+対数リターン = log(当日の終値/前日の終値)
+リターン といっても色んなリターンがあるから二つ試しとく
+
+```{r}
+ret = 100*(close[2:N]-close[1:(N-1)]) / close[1:(N-1)]
+logret = log(close[2:N]/close[1:(N-1)])
+```
+
+とりあえずプロット
+```{r}
+plot(ret, type="o", main="daily return")
+plot(logret, type="o", main="log return")
+```
+
+やっぱりコロナが~とか言い出した3月ぐらいからちょっとの間の変動がすごい
+ただのリターンも、ログリターンもスケールが変わるだけで形は一緒
+
+このデータをGARCHに食わせる
+ボラの初期値わからんからとりあえず1にしとく
+```{r}
+sigma1 = 1
+data1 = list(T=N-1, r=ret, sigma1=sigma1)
+datalog = list(T=N-1, r=logret, sigma1=sigma1)
+fit = stan("garchmodel.stan", data = data1)
+fitlog = stan("garchmodel.stan", data=datalog)
+```
+```{r}
+traceplot(fit)
+traceplot(fitlog)
+```
+```{r}
+fit
+```
+Gelman RubinのRハットの値が１なので収束はしてると思える
+
+```{r}
+ms = rstan::extract(fit)
+mslog = rstan::extract(fitlog)
+vola = ms$sigma
+vola_log = mslog$sigma
+```
+
+```{r}
+vola_est = c()
+vola_log_est = c()
+for (i in 1:(N-1)) {
+  vola_est = c(vola_est, median(vola[,i]))
+  vola_log_est = c(vola_log_est, median(vola_log[,i]))
+}
+plot(vola_est, type="o", main="volatility (with daily return)")
+plot(vola_log_est[4:(N-1)], type="o", main="volatility (with log return)")
+plot(ret, type="o", main="daily return")
+plot(logret, type="o", main="log return")
+```
+一応2020年からの1年のボラを推定した。
+日経225 ボラ　でネットで検索して出てくるボラのチャートのグラフとまあまあ似てる
+https://indexes.nikkei.co.jp/nkave/index/profile?cid=5&idx=nk225vi
+
+対数リターンを使って推定したやつは初期値1が大きすぎてグラフが見にくくなるから時点4から
+をプロットしてる。
+
+ふつうのリターンと対数リターンを使ったボラの推定のプロットはかなり違う。
+リターンと対数リターンそのもののプロットはスケールが違うだけで同じだった
+
+```{r}
+load("garch.RData")
+```
+
