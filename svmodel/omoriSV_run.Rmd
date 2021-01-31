@@ -1,0 +1,82 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+大森SVを動かしてみる。
+これはリターンとボラの相関を考慮してるからちょっとややかしい
+```{r}
+library(rstan)
+```
+
+```{r}
+df = read.csv("input/N225_1year.csv")
+close = df$Close
+T = length(close)
+ret = log(close[2:T]/close[1:(T-1)])
+```
+
+とりあえず対数リターンの系列をプロット
+```{r}
+plot(ret, type="o", main="log return")
+plot(close, type="l", col="red")
+```
+```{r}
+data1 = list(T=T-1, y=ret)
+fit = stan("omoriSV.stan", data=data1)
+```
+むちゃくちゃfitに時間かかった10分はかかった
+
+```{r}
+ms = rstan::extract(fit)
+```
+```{r}
+traceplot(fit)
+```
+トレースプロットはまぁまぁ暴れてる？
+
+```{r}
+hist(ms$phi)
+```
+持続性パラメータφのヒストグラム
+1に近いとこに分布してることから、対数ボラの長期記憶性がわかる。
+
+```{r}
+hist(ms$rho)
+```
+こちらはリターンと対数ボラの相関ρのヒストグラム
+負の値になっていて、確かにレバレッジ効果があるみたいだ。
+
+```{r}
+hist(ms$h)
+```
+これは対数ボラh
+対数ボラは正規性があるとか言われている。
+まぁまぁ正規性がありそうな見た目はしてる
+
+推定されたモデル式をだすために、各パラメータの推定値をだす。
+
+```{r}
+mu_vola_est = median(ms$mu_vola)
+phi_est = median(ms$phi)
+sigma_eta_est = median(ms$sigma_eta)
+rho_est = median(ms$rho)
+h_est = c()
+for (t in 1:(T-1)){
+ h_est = c(h_est, median(ms$h[,t])) 
+}
+```
+モデルパラメータ
+```{r}
+para = c(mu_vola_est, phi_est, sigma_eta_est, rho_est)
+print(para)
+```
+順に、対数ボラの平均、持続性、対数ボラの誤差標準偏差、リターンと対数ボラの相関係数
+である。持続性と相関は色々な文献の結果と一致する。いい感じ。
+
+```{r}
+plot(h_est, type="l", main="log vola")
+plot(exp(h_est), type="l", main="volatility", col="blue")
+```
+
+改善の余地はあるだろうが、どりあえずよし！
