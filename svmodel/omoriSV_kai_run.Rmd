@@ -1,0 +1,45 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+ウィシャート分布を使ってみる
+基本的にはomoriSVと同じだが、wishartを使ってモデル化した
+
+```{r}
+library(rstan)
+```
+
+```{r}
+df = read.csv("input/N225_1year.csv")
+close = df$Close
+T = length(close)
+ret = log(close[2:T]/close[1:(T-1)])
+```
+
+とりあえず対数リターンの系列をプロット
+```{r}
+plot(ret, type="o", main="log return")
+plot(close, type="l", col="red")
+```
+
+適合させてみる
+
+```{r}
+data1 = list(T=T-1, y=ret)
+fit = stan("omoriSV_kai.stan", data=data1)
+```
+かかった時間はあんまり変わらん気がする。むしろちょっとおそい
+ひとつのchainに対して110秒ぐらいかかってる
+
+```{r}
+traceplot(fit)
+```
+トレースプロットがむちゃくちゃ
+
+```{r}
+stan_ac(fit)
+```
+自己相関が高すぎる。
+
+何があかんのやろうか。。。とりあえずwishartで計算速くする作戦は失敗。

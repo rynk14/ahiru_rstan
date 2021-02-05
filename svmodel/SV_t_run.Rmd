@@ -1,0 +1,68 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+リターンの誤差分布をt分布としてモデル化
+SV_t.stanを動かす
+
+```{r}
+library(rstan)
+```
+
+```{r}
+df = read.csv("input/N225_1year.csv")
+close = df$Close
+T = length(close)
+ret = log(close[2:T]/close[1:(T-1)])
+```
+
+とりあえず対数リターンの系列をプロット
+```{r}
+plot(ret, type="o", main="log return")
+plot(close, type="l", col="red")
+```
+
+```{r}
+data1 = list(T=T-1, y=ret)
+
+fit = stan("SV_t.stan", data=data1)
+```
+リターンと対数ボラの相関を考慮しなければ計算速い。
+4chainで100秒ちょっとでいける
+ちなみにこれは1年分のデータ
+
+```{r}
+traceplot(fit)
+```
+```{r}
+fit
+```
+対数ボラの誤差分散のR_hatが1.14と高め。
+アヒル本によると1.1未満がいいらしい
+超えてるてことは収束しきってない可能性大
+
+```{r}
+ms = rstan::extract(fit)
+stan_ac(fit)
+```
+誤差分散と持続性はlagがひらいても自己相関ある
+
+```{r}
+hist(ms$phi)
+```
+持続性は高い、すなわち対数ボラの長期記憶性が示唆される
+
+```{r}
+hist(ms$h)
+```
+対数ボラの分布、これもt分布でも何となく正規ぽい
+ちょっと右に歪んでる
+
+```{r}
+h_est = c()
+for (t in 1:(T-1)){
+ h_est = c(h_est, median(ms$h[,t])) 
+}
+plot(exp(h_est), type="l", main="volatility with Student's t return")
+```
+大体いつもとおなじ結果
