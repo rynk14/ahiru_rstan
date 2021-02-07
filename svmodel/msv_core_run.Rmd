@@ -1,0 +1,136 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+リターンとボラの相関を考慮する標準的なMSV
+
+```{r}
+library(rstan)
+```
+
+```{r}
+# リターンデータを入力
+df = read.csv("input/spy_bac_daily_return.csv")
+df
+```
+
+
+2001/2/1~2009/12/31の日次リターンデータ
+
+```{r}
+ret = df[c("SPY.C.to.C" ,"BAC.C.to.C")][1:244,] # 1年分だけ
+dimention = ncol(ret) # 次元
+samplesize = nrow(ret) # サンプルサイズ
+```
+
+とりあえずplot
+
+```{r}
+plot(ret$SPY.C.to.C, type="l", main="SPY return", col="red")
+plot(ret$BAC.C.to.C, type="l", main="BAC return", col="blue")
+```
+```{r}
+# データの成形
+ret = t(as.matrix(ret))
+```
+
+
+```{r}
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+data1 = list(dim=dimention, T=samplesize, y=ret)
+stanmodel = stan_model(file="msv_core.stan")
+fit = sampling(
+  stanmodel, data=data1, chain=2, iter=1000, warmup=200
+)
+```
+
+対数ボラとリターンの相関を考慮してもそんなに時間変わらない
+2分ちょっと
+
+結果を見ていく
+
+```{r}
+fit
+```
+
+Rhatとn_effいいねえ
+
+```{r}
+traceplot(fit)
+```
+トレースプロットもいいねえ
+
+```{r}
+stan_ac(fit)
+```
+すばらしいい
+
+```{r}
+ms = rstan::extract(fit)
+hist(ms$phi)
+```
+持続性もまとも
+
+```{r}
+hist(ms$rho[,1,1], main="Cor(spy_return, spy_logvola)")
+hist(ms$rho[,2,2], main="Cor(bac_return, bac_logvola)")
+```
+各資産でのリターンとボラの相関はどちらも負
+レバレッジ効果あり
+
+```{r}
+vola = ms$h
+vola1 = c()
+vola2 = c()
+for (t in 1:samplesize) {
+  vola1 = c(vola1, mean(vola[,1,t]))
+  vola2 = c(vola2, mean(vola[,2,t]))
+}
+plot(exp(vola1), type="l", col="red", main="spy vola")
+plot(exp(vola2), type="l", col="blue", main="bac vola")
+plot(ret$SPY.C.to.C, type="l", main="SPY return", col="red")
+plot(ret$BAC.C.to.C, type="l", main="BAC return", col="blue")
+
+```
+リターンとボラの相関考慮してないmsv_noncorreよりもなんだかそれっぽいものができた
+
+このspyとbacの日次リターンデータは山内大森2020で用いていたものの一部。
+そのデータセットには実現ボラデータがある。
+
+```{r}
+rv = read.csv("input/spy_bac_realized_covariance_1min.csv")
+rv
+```
+
+モデルの推定値と実現ボラを比較してみる
+
+```{r}
+plot(rv$SPY.realized.variance[1:samplesize], type="l", col="red", main="spy RV")
+plot(rv$BAC.realized.variance[1:samplesize], type="l", col="blue", main="bac RV")
+plot(exp(vola1), type="l", col="red", main="spy vola")
+plot(exp(vola2), type="l", col="blue", main="bac vola")
+```
+大きくなるポイントは似てるが、強弱が違う。実現ボラは大きくなる時はドカーンと大きくなる。
+形が全然違うように見えるが、平均的なラインは1.6ぐらいでだいたい同じ
+強弱の具合が違う
+
+
+========================まとめ==========================
+
+ここ３つでやってきた
+・レバレッジなし分散の事前分布なし
+・レバレッジなし分散の事前分布あり
+・レバレッジあり分散の事前分布あり
+
+分散の事前分布を設定したほうが、若干遅くなるが良いサンプリングができた
+レバレッジありなしでは、サンプリングの質は違うが、ボラの推定はよくなった気がする。
+
+1000繰り返し (前200回はburn-in) で2連鎖、1年分×2変量のデータなら
+並列化計算で2分ちょいでいける
+
+検討事項
+このモデルでは相関を一定 (時間変化じゃない) としたが、ボラと同じく確率変動することを仮定するモデル
+実現測定量を取り入れたモデル (山内大森のMRSV)
+

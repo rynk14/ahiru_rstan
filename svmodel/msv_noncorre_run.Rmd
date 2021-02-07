@@ -1,0 +1,91 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+標準的な多変量SVモデルを動かしてみる
+
+returnとvolaは相関なしで実装してみる
+
+```{r}
+library(rstan)
+```
+
+```{r}
+# リターンデータを入力
+df = read.csv("input/spy_bac_daily_return.csv")
+df
+```
+
+2001/2/1~2009/12/31の日次リターンデータ
+
+```{r}
+ret = df[c("SPY.C.to.C" ,"BAC.C.to.C")][1:244,] # 1年分だけ
+dimention = ncol(ret) # 次元
+samplesize = nrow(ret) # サンプルサイズ
+```
+
+とりあえずplot
+
+```{r}
+plot(ret$SPY.C.to.C, type="l", main="SPY return", col="red")
+plot(ret$BAC.C.to.C, type="l", main="BAC return", col="blue")
+```
+
+```{r}
+# データの成形
+ret = t(as.matrix(ret))
+```
+
+```{r}
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+data1 = list(dim=dimention, T=samplesize, y=ret)
+stanmodel = stan_model(file="msv_noncorre.stan")
+fit = sampling(
+  stanmodel, data=data1, chain=2, iter=1000, warmup=200
+)
+```
+burn-in 200 sample 1000 chain 2 として並列計算で高速化
+1年分の2変量データに対して、トータル112s 2分かかった
+
+では結果を見よう
+
+```{r}
+fit
+```
+まずまずではなかろうか
+ただ誤差分散sigmaとかphiが気になる
+
+```{r}
+ms = rstan::extract(fit)
+traceplot(fit)
+```
+トレースプロット、sigmaとphiががたがた
+ボラは良い感じ
+
+```{r}
+hist(ms$phi)
+```
+持続性のパラメータはまとも
+```{r}
+stan_ac(fit)
+```
+自己相関が残りまくってる
+
+```{r}
+vola = ms$h
+vola1 = c()
+vola2 = c()
+for (t in 1:samplesize) {
+  vola1 = c(vola1, mean(vola[,1,t]))
+  vola2 = c(vola2, mean(vola[,2,t]))
+}
+plot(exp(vola1), type="l", col="red", main="spy vola")
+plot(exp(vola2), type="l", col="blue", main="bac vola")
+plot(ret$SPY.C.to.C, type="l", main="SPY return", col="red")
+plot(ret$BAC.C.to.C, type="l", main="BAC return", col="blue")
+
+```
+ボラの推定量とリターンのプロット、
+いいのか悪いのかわからない
