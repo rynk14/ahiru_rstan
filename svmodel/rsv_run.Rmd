@@ -1,0 +1,88 @@
+---
+title: RSVモデルの実行
+output: html_notebook
+---
+
+単変量RSVモデルを実行する
+
+実現ボラはデータセットにあるのを流用する。
+
+```{r}
+library(rstan)
+```
+```{r}
+dfreturn = read.csv("input/spy_bac_daily_return.csv")
+dfrv = read.csv("input/spy_bac_realized_covariance_1min.csv")
+```
+
+```{r}
+dfreturn
+```
+
+```{r}
+dfrv
+```
+
+```{r}
+# リターンと実現ボラ1年分
+y = dfreturn$SPY.C.to.C[1:244]
+rv = dfrv$SPY.realized.variance[1:244]
+```
+
+とりあえずプロット
+```{r}
+plot(y, type="l", main="return", col="red")
+plot(rv, type="l", main="realized vola", col="blue")
+```
+
+```{r}
+samplesize = length(y)
+```
+
+```{r}
+rstan_options(auto_write=TRUE)
+options(mc.cores=parallel::detectCores())
+data1 = list(T=samplesize, y=y, x=log(rv))
+stanmodel = stan_model(file="rsv.stan")
+fit = sampling(
+  stanmodel, data=data1, chain=2, iter=1000, warmup=200, seed=1
+)
+```
+
+111秒かかった
+
+```{r}
+fit
+```
+
+まずまずじゃないですか
+
+```{r}
+ms = rstan::extract(fit)
+hist(ms$phi)
+hist(ms$rho)
+```
+
+まぁまぁいいのではないですか
+持続性φは0.98ぐらいで、対数ボラとリターンの相関係数は-0.6ぐらい
+
+```{r}
+hist(ms$xi)
+```
+このxi (ξ) は実現ボラと潜在対数ボラのバイアス補正項
+バイアス補正項がマイナスになってる、すなわちこの実現ぼらは過大評価してるタイプのやつ
+
+```{r}
+vola_est = c()
+for (t in 1:samplesize) {
+  vola_est = c(vola_est, mean(ms$h[,t]))
+}
+plot(exp(vola_est), type="l", main="vola_est", col="red")
+plot(rv, type="l", main="realized vola", col="blue")
+plot(y, type="l", main="return", col="red")
+```
+なんかにてるっちゃ似てるけど微妙かな
+
+とりあえず単変量RSVモデルは実装できた。
+
+
